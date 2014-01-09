@@ -98,12 +98,12 @@ var setPlugin = function(root) {
 
 	root.connect = function (conf) {
 		setPlugin(root);
-		navigator.requestMIDIAccess(function (access) {
+        navigator.requestMIDIAccess().then(function (access) {
 			plugin = access;
-			output = plugin.getOutput(0);
+			output = plugin.outputs()[0];
 			if (conf.callback) conf.callback();
 		}, function (err) { // well at least we tried!
-			if (window.webkitAudioContext) { // Chrome
+			if (window.AudioContext || window.webkitAudioContext) { // Chrome
 				conf.api = "webaudio";
 			} else if (window.Audio) { // Firefox
 				conf.api = "audiotag";
@@ -184,12 +184,20 @@ if (window.AudioContext || window.webkitAudioContext) (function () {
 		source.buffer = audioBuffers[instrument + "" + note];
 		source.connect(ctx.destination);
 		///
-		var gainNode = ctx.createGainNode();
+		if (ctx.createGain) { // firefox
+			source.gainNode = ctx.createGain();
+		} else { // chrome
+			source.gainNode = ctx.createGainNode();
+		}
 		var value = (velocity / 127) * (masterVolume / 127) * 2 - 1;
-		gainNode.connect(ctx.destination);
-		gainNode.gain.value = Math.max(-1, value);
-		source.connect(gainNode);
-		source.noteOn(delay || 0);
+		source.gainNode.connect(ctx.destination);
+		source.gainNode.gain.value = Math.max(-1, value);
+		source.connect(source.gainNode);
+		if (source.noteOn) { // old api
+			source.noteOn(delay || 0);
+		} else { // new api
+			source.start(delay || 0);
+		}
 		return source;
 	};
 
@@ -198,13 +206,21 @@ if (window.AudioContext || window.webkitAudioContext) (function () {
 		if (delay < ctx.currentTime) delay += ctx.currentTime;
 		var source = sources[channel + "" + note];
 		if (!source) return;
-		// @Miranet: "the values of 0.2 and 0.3 could ofcourse be used as 
-		// a 'release' parameter for ADSR like time settings."
-		// add { "metadata": { release: 0.3 } } to soundfont files
-		source.gain.linearRampToValueAtTime(1, delay);
-		source.gain.linearRampToValueAtTime(0, delay + 0.2);
-		source.noteOff(delay + 0.3);
-		return source;
+		if (source.gainNode) {
+			// @Miranet: "the values of 0.2 and 0.3 could ofcourse be used as 
+			// a 'release' parameter for ADSR like time settings."
+			// add { "metadata": { release: 0.3 } } to soundfont files
+			var gain = source.gainNode.gain;
+			gain.linearRampToValueAtTime(gain.value, delay);
+			gain.linearRampToValueAtTime(-1, delay + 0.2);
+		}
+		if (source.noteOff) { // old api
+			source.noteOff(delay + 0.3);
+		} else {
+			source.stop(delay + 0.3);
+		}
+		///
+		delete sources[channel + "" + note];
 	};
 
 	root.chordOn = function (channel, chord, velocity, delay) {
@@ -222,6 +238,19 @@ if (window.AudioContext || window.webkitAudioContext) (function () {
 		}
 		return ret;
 	};
+
+    root.stopAllNotes = function () {
+        for(var source in sources) {
+            var delay = 0;
+            if (delay < ctx.currentTime) delay += ctx.currentTime;
+            // @Miranet: "the values of 0.2 and 0.3 could ofcourse be used as
+            // a 'release' parameter for ADSR like time settings."
+            // add { "metadata": { release: 0.3 } } to soundfont files
+            sources[source].gain.linearRampToValueAtTime(1, delay);
+            sources[source].gain.linearRampToValueAtTime(0, delay + 0.2);
+            sources[source].noteOff(delay + 0.3);
+        }
+    };
 
 	root.connect = function (conf) {
 		setPlugin(root);
