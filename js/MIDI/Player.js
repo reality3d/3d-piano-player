@@ -256,7 +256,8 @@ var stopAudio = function () {
 			var source = o.source;
 			source.disconnect(0);
 			if (source.noteOff) { // old api
-				source.noteOff(0);
+				// r3D hack: next line commented due to https://code.google.com/p/chromium/issues/detail?id=324652
+				//source.noteOff(0);
 			} else {
 				source.stop(0);
 			}
